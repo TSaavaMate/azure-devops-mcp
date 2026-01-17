@@ -3,6 +3,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebApi } from "azure-devops-node-api";
+import * as Diff from "diff";
 import {
   GitRef,
   GitForkRef,
@@ -46,6 +47,11 @@ const REPO_TOOLS = {
   update_pull_request_thread: "repo_update_pull_request_thread",
   search_commits: "repo_search_commits",
   list_pull_requests_by_commits: "repo_list_pull_requests_by_commits",
+  // New tools for PR diff support
+  get_pr_iterations: "repo_get_pr_iterations",
+  get_pr_iteration_changes: "repo_get_pr_iteration_changes",
+  get_commit_changes: "repo_get_commit_changes",
+  get_file_diff: "repo_get_file_diff",
 };
 
 function branchesFilterOutIrrelevantProperties(branches: GitRef[], top: number) {
@@ -1435,6 +1441,297 @@ function configureRepoTools(server: McpServer, tokenProvider: () => Promise<stri
 
         return {
           content: [{ type: "text", text: `Error querying pull requests by commits: ${errorMessage}` }],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // ============================================
+  // NEW TOOLS FOR PR DIFF SUPPORT
+  // ============================================
+
+  server.tool(
+    REPO_TOOLS.get_pr_iterations,
+    "Get all iterations (updates) for a pull request. Each iteration represents a set of changes pushed to the source branch.",
+    {
+      repositoryId: z.string().describe("The ID of the repository where the pull request is located."),
+      pullRequestId: z.number().describe("The ID of the pull request."),
+      project: z.string().optional().describe("Project ID or project name (optional)"),
+      includeCommits: z.boolean().optional().default(false).describe("Whether to include commits for each iteration."),
+    },
+    async ({ repositoryId, pullRequestId, project, includeCommits }) => {
+      try {
+        const connection = await connectionProvider();
+        const gitApi = await connection.getGitApi();
+
+        const iterations = await gitApi.getPullRequestIterations(repositoryId, pullRequestId, project, includeCommits);
+
+        const trimmedIterations = iterations?.map((iteration) => ({
+          id: iteration.id,
+          description: iteration.description,
+          author: {
+            displayName: iteration.author?.displayName,
+            uniqueName: iteration.author?.uniqueName,
+          },
+          createdDate: iteration.createdDate,
+          updatedDate: iteration.updatedDate,
+          sourceRefCommit: iteration.sourceRefCommit?.commitId,
+          targetRefCommit: iteration.targetRefCommit?.commitId,
+          commonRefCommit: iteration.commonRefCommit?.commitId,
+          hasMoreCommits: iteration.hasMoreCommits,
+          reason: iteration.reason,
+          changeList: iteration.changeList?.map((change) => ({
+            changeId: change.changeId,
+            item: {
+              path: change.item?.path,
+              objectId: change.item?.objectId,
+              originalObjectId: change.item?.originalObjectId,
+            },
+            changeType: change.changeType,
+          })),
+        }));
+
+        return {
+          content: [{ type: "text", text: JSON.stringify(trimmedIterations, null, 2) }],
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+
+        return {
+          content: [{ type: "text", text: `Error getting pull request iterations: ${errorMessage}` }],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  server.tool(
+    REPO_TOOLS.get_pr_iteration_changes,
+    "Get the list of files changed in a specific pull request iteration. Returns file paths, change types, and object IDs for computing diffs.",
+    {
+      repositoryId: z.string().describe("The ID of the repository where the pull request is located."),
+      pullRequestId: z.number().describe("The ID of the pull request."),
+      iterationId: z.number().describe("The iteration ID to get changes for. Use repo_get_pr_iterations to list available iterations."),
+      project: z.string().optional().describe("Project ID or project name (optional)"),
+      compareTo: z.number().optional().describe("Compare changes to this iteration ID (base iteration). If not specified, compares to the target branch."),
+      top: z.number().optional().default(100).describe("Maximum number of changes to return."),
+      skip: z.number().optional().default(0).describe("Number of changes to skip."),
+    },
+    async ({ repositoryId, pullRequestId, iterationId, project, compareTo, top, skip }) => {
+      try {
+        const connection = await connectionProvider();
+        const gitApi = await connection.getGitApi();
+
+        const changes = await gitApi.getPullRequestIterationChanges(repositoryId, pullRequestId, iterationId, project, top, skip, compareTo);
+
+        const trimmedChanges = {
+          changeEntries: changes?.changeEntries?.map((entry) => ({
+            changeId: entry.changeId,
+            changeTrackingId: entry.changeTrackingId,
+            changeType: entry.changeType,
+            item: {
+              path: entry.item?.path,
+              objectId: entry.item?.objectId,
+              originalObjectId: entry.item?.originalObjectId,
+              gitObjectType: entry.item?.gitObjectType,
+              commitId: entry.item?.commitId,
+              isFolder: entry.item?.isFolder,
+            },
+            originalPath: entry.originalPath,
+          })),
+          nextSkip: changes?.nextSkip,
+          nextTop: changes?.nextTop,
+        };
+
+        return {
+          content: [{ type: "text", text: JSON.stringify(trimmedChanges, null, 2) }],
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+
+        return {
+          content: [{ type: "text", text: `Error getting pull request iteration changes: ${errorMessage}` }],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  server.tool(
+    REPO_TOOLS.get_commit_changes,
+    "Get the list of files changed in a specific commit. Returns file paths, change types, and object IDs.",
+    {
+      repositoryId: z.string().describe("The ID of the repository."),
+      commitId: z.string().describe("The SHA1 hash of the commit."),
+      project: z.string().optional().describe("Project ID or project name (optional)"),
+      top: z.number().optional().default(100).describe("Maximum number of changes to return."),
+      skip: z.number().optional().default(0).describe("Number of changes to skip."),
+    },
+    async ({ repositoryId, commitId, project, top, skip }) => {
+      try {
+        const connection = await connectionProvider();
+        const gitApi = await connection.getGitApi();
+
+        const changes = await gitApi.getChanges(commitId, repositoryId, project, top, skip);
+
+        const trimmedChanges = {
+          changeCounts: changes?.changeCounts,
+          changes: changes?.changes?.map((change) => ({
+            changeType: change.changeType,
+            item: {
+              path: change.item?.path,
+              objectId: change.item?.objectId,
+              originalObjectId: change.item?.originalObjectId,
+              gitObjectType: change.item?.gitObjectType,
+              commitId: change.item?.commitId,
+              isFolder: change.item?.isFolder,
+            },
+            originalPath: change.originalPath,
+            sourceServerItem: change.sourceServerItem,
+            url: change.url,
+          })),
+        };
+
+        return {
+          content: [{ type: "text", text: JSON.stringify(trimmedChanges, null, 2) }],
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+
+        return {
+          content: [{ type: "text", text: `Error getting commit changes: ${errorMessage}` }],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  server.tool(
+    REPO_TOOLS.get_file_diff,
+    "Get a unified diff for a specific file by fetching the before and after versions and computing the diff. Use this to see the actual line-by-line changes in a file.",
+    {
+      repositoryId: z.string().describe("The ID of the repository."),
+      project: z.string().optional().describe("Project ID or project name (optional)"),
+      filePath: z.string().describe("The path to the file (e.g., '/src/index.ts')."),
+      originalObjectId: z.string().optional().describe("The object ID of the original (before) version of the file. Can be empty for new files."),
+      modifiedObjectId: z.string().optional().describe("The object ID of the modified (after) version of the file. Can be empty for deleted files."),
+      originalVersion: z.string().optional().describe("Alternative: Git version descriptor for original version (e.g., branch name, commit SHA, or tag)."),
+      modifiedVersion: z.string().optional().describe("Alternative: Git version descriptor for modified version (e.g., branch name, commit SHA, or tag)."),
+      contextLines: z.number().optional().default(3).describe("Number of context lines to include around changes."),
+    },
+    async ({ repositoryId, project, filePath, originalObjectId, modifiedObjectId, originalVersion, modifiedVersion, contextLines }) => {
+      try {
+        const connection = await connectionProvider();
+        const gitApi = await connection.getGitApi();
+
+        let originalContent = "";
+        let modifiedContent = "";
+
+        // Normalize file path - ensure it starts with /
+        const normalizedPath = filePath.startsWith("/") ? filePath : "/" + filePath;
+
+        // Fetch original content
+        if (originalObjectId) {
+          try {
+            const originalBlob = await gitApi.getBlobContent(repositoryId, originalObjectId, project, true);
+            if (originalBlob) {
+              const chunks: Buffer[] = [];
+              for await (const chunk of originalBlob as AsyncIterable<Buffer>) {
+                chunks.push(chunk);
+              }
+              originalContent = Buffer.concat(chunks).toString("utf-8");
+            }
+          } catch (e) {
+            // File might not exist in original version (new file)
+            originalContent = "";
+          }
+        } else if (originalVersion) {
+          try {
+            const originalItem = await gitApi.getItemContent(repositoryId, normalizedPath, project, undefined, undefined, undefined, undefined, undefined, {
+              version: originalVersion,
+            });
+            if (originalItem) {
+              const chunks: Buffer[] = [];
+              for await (const chunk of originalItem as AsyncIterable<Buffer>) {
+                chunks.push(chunk);
+              }
+              originalContent = Buffer.concat(chunks).toString("utf-8");
+            }
+          } catch (e) {
+            // File might not exist in original version
+            originalContent = "";
+          }
+        }
+
+        // Fetch modified content
+        if (modifiedObjectId) {
+          try {
+            const modifiedBlob = await gitApi.getBlobContent(repositoryId, modifiedObjectId, project, true);
+            if (modifiedBlob) {
+              const chunks: Buffer[] = [];
+              for await (const chunk of modifiedBlob as AsyncIterable<Buffer>) {
+                chunks.push(chunk);
+              }
+              modifiedContent = Buffer.concat(chunks).toString("utf-8");
+            }
+          } catch (e) {
+            // File might not exist in modified version (deleted file)
+            modifiedContent = "";
+          }
+        } else if (modifiedVersion) {
+          try {
+            const modifiedItem = await gitApi.getItemContent(repositoryId, normalizedPath, project, undefined, undefined, undefined, undefined, undefined, {
+              version: modifiedVersion,
+            });
+            if (modifiedItem) {
+              const chunks: Buffer[] = [];
+              for await (const chunk of modifiedItem as AsyncIterable<Buffer>) {
+                chunks.push(chunk);
+              }
+              modifiedContent = Buffer.concat(chunks).toString("utf-8");
+            }
+          } catch (e) {
+            // File might not exist in modified version
+            modifiedContent = "";
+          }
+        }
+
+        // Compute unified diff
+        const diff = Diff.createTwoFilesPatch(
+          `a${normalizedPath}`,
+          `b${normalizedPath}`,
+          originalContent,
+          modifiedContent,
+          "original",
+          "modified",
+          { context: contextLines }
+        );
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  filePath: normalizedPath,
+                  originalObjectId: originalObjectId || originalVersion || null,
+                  modifiedObjectId: modifiedObjectId || modifiedVersion || null,
+                  diff: diff,
+                  originalLineCount: originalContent.split("\n").length,
+                  modifiedLineCount: modifiedContent.split("\n").length,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+
+        return {
+          content: [{ type: "text", text: `Error computing file diff: ${errorMessage}` }],
           isError: true,
         };
       }
