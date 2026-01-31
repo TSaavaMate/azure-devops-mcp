@@ -85,9 +85,10 @@ async function main() {
 
     // Print summary
     console.log("\n" + chalk.bold("Result:"));
-    const blockCount = result.issues.filter((i) => i.severity === "BLOCK").length;
-    const highCount = result.issues.filter((i) => i.severity === "HIGH").length;
-    const mediumCount = result.issues.filter((i) => i.severity === "MEDIUM").length;
+    const issues = result.issues || [];
+    const blockCount = issues.filter((i) => i.severity === "BLOCK").length;
+    const highCount = issues.filter((i) => i.severity === "HIGH").length;
+    const mediumCount = issues.filter((i) => i.severity === "MEDIUM").length;
 
     const blockText = blockCount > 0 ? chalk.red(`${blockCount} BLOCK`) : chalk.green("0 BLOCK");
     const highText = highCount > 0 ? chalk.yellow(`${highCount} HIGH`) : chalk.green("0 HIGH");
@@ -110,4 +111,7 @@ async function main() {
   }
 }
 
-main();
+main().catch((error) => {
+  console.error(chalk.red("\nFatal Error:"), error instanceof Error ? error.message : String(error));
+  process.exit(2);
+});
