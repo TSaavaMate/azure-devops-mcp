@@ -110,13 +110,13 @@ Location: `~/.pr-review/config.json` or project-level `.pr-review.json`
 
 ### Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `AZURE_DEVOPS_PAT` | Azure DevOps Personal Access Token |
-| `ANTHROPIC_API_KEY` | Claude API key |
-| `AZURE_OPENAI_API_KEY` | Azure OpenAI API key |
-| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI endpoint URL |
-| `OPENAI_API_KEY` | OpenAI API key |
+| Variable                | Description                        |
+| ----------------------- | ---------------------------------- |
+| `AZURE_DEVOPS_PAT`      | Azure DevOps Personal Access Token |
+| `ANTHROPIC_API_KEY`     | Claude API key                     |
+| `AZURE_OPENAI_API_KEY`  | Azure OpenAI API key               |
+| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI endpoint URL          |
+| `OPENAI_API_KEY`        | OpenAI API key                     |
 
 ### CLI Usage
 
@@ -229,10 +229,10 @@ interface ReviewResult {
 interface Issue {
   file: string;
   line: number;
-  severity: 'BLOCK' | 'HIGH' | 'MEDIUM';
+  severity: "BLOCK" | "HIGH" | "MEDIUM";
   category: string;
-  message: string;  // The witty roast
-  fix: string;      // The actual fix
+  message: string; // The witty roast
+  fix: string; // The actual fix
 }
 ```
 
@@ -287,36 +287,42 @@ Exit code: 1 (blockers found)
 ## Implementation Steps
 
 ### Phase 1: Monorepo Setup
+
 1. Initialize pnpm workspace
 2. Create `packages/core/` with shared Azure DevOps client
 3. Move existing MCP server code to `packages/mcp-server/`
 4. Verify existing functionality still works
 
 ### Phase 2: Core Package
+
 1. Extract Azure DevOps client from MCP server
 2. Implement PAT authentication
 3. Implement PR fetch (metadata, iterations, diffs)
 4. Implement comment posting (threads, replies)
 
 ### Phase 3: PR Review CLI
+
 1. Create `packages/pr-review/` structure
 2. Implement CLI parser with yargs
 3. Implement config loader
 4. Copy and adapt review rules
 
 ### Phase 4: LLM Adapters
+
 1. Define adapter interface
 2. Implement Claude adapter
 3. Implement Azure OpenAI adapter
 4. Implement OpenAI adapter
 
 ### Phase 5: Review Logic
+
 1. Build prompt from PR data + rules
 2. Parse LLM response
 3. Post comments to Azure DevOps
 4. Generate summary
 
 ### Phase 6: Polish
+
 1. Add `--dry-run` mode
 2. Add `pr-review init` command
 3. Error handling and logging
@@ -327,10 +333,12 @@ Exit code: 1 (blockers found)
 ## Dependencies
 
 ### Core Package
+
 - `azure-devops-node-api` - Azure DevOps REST API client
 - `zod` - Schema validation
 
 ### PR Review CLI
+
 - `yargs` - CLI argument parsing
 - `@anthropic-ai/sdk` - Claude API
 - `openai` - OpenAI API

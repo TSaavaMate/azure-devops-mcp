@@ -1698,15 +1698,7 @@ function configureRepoTools(server: McpServer, tokenProvider: () => Promise<stri
         }
 
         // Compute unified diff
-        const diff = Diff.createTwoFilesPatch(
-          `a${normalizedPath}`,
-          `b${normalizedPath}`,
-          originalContent,
-          modifiedContent,
-          "original",
-          "modified",
-          { context: contextLines }
-        );
+        const diff = Diff.createTwoFilesPatch(`a${normalizedPath}`, `b${normalizedPath}`, originalContent, modifiedContent, "original", "modified", { context: contextLines });
 
         return {
           content: [
