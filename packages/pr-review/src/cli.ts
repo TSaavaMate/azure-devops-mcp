@@ -2,10 +2,13 @@
 
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
-import { config } from "dotenv";
+import { config as loadEnv } from "dotenv";
+import chalk from "chalk";
+import { loadConfig } from "./config.js";
+import { PRReviewer } from "./reviewer.js";
 
 // Load environment variables
-config();
+loadEnv();
 
 const argv = yargs(hideBin(process.argv))
   .scriptName("pr-review")
@@ -57,19 +60,54 @@ const argv = yargs(hideBin(process.argv))
   .parseSync();
 
 async function main() {
-  console.log("PR Review CLI");
-  console.log("=============");
-  console.log(`Organization: ${argv.org}`);
-  console.log(`Project: ${argv.project}`);
-  console.log(`PR: ${argv.pr}`);
-  console.log(`Provider: ${argv.provider}`);
-  console.log(`Dry run: ${argv.dryRun}`);
+  console.log(chalk.bold("PR Review CLI"));
+  console.log(chalk.dim("=============\n"));
 
-  // TODO: Implement review logic
-  console.log("\n[Not yet implemented]");
+  try {
+    // Load configuration
+    const config = loadConfig({
+      provider: argv.provider,
+      model: argv.model,
+      config: argv.config,
+    });
+
+    // Create reviewer
+    const reviewer = new PRReviewer(config, argv.org, argv.project);
+
+    // Run review
+    const { result, postedComments, summaryPosted } = await reviewer.review({
+      organization: argv.org,
+      project: argv.project,
+      repositoryId: argv.repo || argv.project,
+      pullRequestId: argv.pr,
+      dryRun: argv.dryRun,
+    });
+
+    // Print summary
+    console.log("\n" + chalk.bold("Result:"));
+    const blockCount = result.issues.filter((i) => i.severity === "BLOCK").length;
+    const highCount = result.issues.filter((i) => i.severity === "HIGH").length;
+    const mediumCount = result.issues.filter((i) => i.severity === "MEDIUM").length;
+
+    const blockText = blockCount > 0 ? chalk.red(`${blockCount} BLOCK`) : chalk.green("0 BLOCK");
+    const highText = highCount > 0 ? chalk.yellow(`${highCount} HIGH`) : chalk.green("0 HIGH");
+    const mediumText = `${mediumCount} MEDIUM`;
+
+    console.log(`${blockText} | ${highText} | ${mediumText}`);
+
+    if (!argv.dryRun) {
+      console.log(chalk.dim(`\nPosted ${postedComments} inline comments`));
+      if (summaryPosted) {
+        console.log(chalk.dim("Summary comment posted"));
+      }
+    }
+
+    // Exit code based on blockers
+    process.exit(blockCount > 0 ? 1 : 0);
+  } catch (error) {
+    console.error(chalk.red("\nError:"), error instanceof Error ? error.message : error);
+    process.exit(2);
+  }
 }
 
-main().catch((error) => {
-  console.error("Error:", error.message);
-  process.exit(1);
-});
+main();
