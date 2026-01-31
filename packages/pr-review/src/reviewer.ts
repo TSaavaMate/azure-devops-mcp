@@ -55,19 +55,26 @@ export class PRReviewer {
       endpoint: this.config.llm.endpoint,
     });
 
-    const result = await llm.review({
-      prMetadata: {
-        id: prDiff.pr.id,
-        title: prDiff.pr.title,
-        description: prDiff.pr.description,
-        sourceBranch: prDiff.pr.sourceBranch,
-        targetBranch: prDiff.pr.targetBranch,
-        author: prDiff.pr.author.displayName,
-      },
-      diffs: prDiff.diffs.map((d) => ({ path: d.path, diff: d.diff })),
-      rules,
-      cleanCodeGuide: this.loadCleanCodeGuide(),
-    });
+    let result: ReviewResult;
+    try {
+      result = await llm.review({
+        prMetadata: {
+          id: prDiff.pr.id,
+          title: prDiff.pr.title,
+          description: prDiff.pr.description,
+          sourceBranch: prDiff.pr.sourceBranch,
+          targetBranch: prDiff.pr.targetBranch,
+          author: prDiff.pr.author.displayName,
+        },
+        diffs: prDiff.diffs.map((d) => ({ path: d.path, diff: d.diff })),
+        rules,
+        cleanCodeGuide: this.loadCleanCodeGuide(),
+      });
+    } catch (error) {
+      throw new Error(
+        `Failed to analyze PR with ${this.config.llm.provider}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
 
     // 4. Post comments (unless dry run)
     let postedComments = 0;
@@ -76,18 +83,26 @@ export class PRReviewer {
     if (!options.dryRun) {
       console.log("\nPosting comments...");
       for (const issue of result.issues) {
-        await this.poster.postInlineComment(options.repositoryId, options.pullRequestId, {
-          filePath: issue.file,
-          line: issue.line,
-          content: this.formatComment(issue),
-        });
-        postedComments++;
-        console.log(`  [${issue.severity}] ${issue.category} (${issue.file}:${issue.line})`);
+        try {
+          await this.poster.postInlineComment(options.repositoryId, options.pullRequestId, {
+            filePath: issue.file,
+            line: issue.line,
+            content: this.formatComment(issue),
+          });
+          postedComments++;
+          console.log(`  • ${issue.severity}: ${issue.category} (${issue.file}:${issue.line})`);
+        } catch (error) {
+          console.error(`  ✗ Failed to post comment at ${issue.file}:${issue.line}: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
 
-      await this.poster.postSummaryComment(options.repositoryId, options.pullRequestId, { content: result.summary });
-      summaryPosted = true;
-      console.log("Summary posted.");
+      try {
+        await this.poster.postSummaryComment(options.repositoryId, options.pullRequestId, { content: result.summary });
+        summaryPosted = true;
+        console.log("📝 Summary posted.");
+      } catch (error) {
+        console.error(`✗ Failed to post summary comment: ${error instanceof Error ? error.message : String(error)}`);
+      }
     } else {
       console.log("\nDry run - would post these comments:");
       for (const issue of result.issues) {
@@ -108,6 +123,7 @@ export class PRReviewer {
       return readFileSync(rulesPath, "utf-8");
     }
 
+    console.warn(`⚠ Rules file not found at ${rulesPath}, using default rules`);
     return "Review for code quality, security issues, and best practices.";
   }
 
@@ -115,8 +131,12 @@ export class PRReviewer {
     const guidePath = this.config.rules?.cleanCodeGuide || join(__dirname, "rules", "clean-code-dotnet.md");
 
     if (existsSync(guidePath)) {
-      // Truncate to avoid token limits
-      return readFileSync(guidePath, "utf-8").slice(0, 20000);
+      const content = readFileSync(guidePath, "utf-8");
+      if (content.length > 20000) {
+        console.warn(`⚠ Clean code guide truncated from ${content.length} to 20000 characters`);
+        return content.slice(0, 20000);
+      }
+      return content;
     }
 
     return undefined;
