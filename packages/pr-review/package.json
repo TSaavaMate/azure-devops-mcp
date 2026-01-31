@@ -1,0 +1,30 @@
+{
+  "name": "@azure-devops/pr-review",
+  "version": "1.0.0",
+  "type": "module",
+  "bin": {
+    "pr-review": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@azure-devops/core": "workspace:*",
+    "@anthropic-ai/sdk": "^0.39.0",
+    "openai": "^4.77.0",
+    "yargs": "^18.0.0",
+    "zod": "^3.25.63",
+    "chalk": "^5.4.1",
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.1",
+    "@types/yargs": "^17.0.33",
+    "typescript": "^5.9.3",
+    "vitest": "^3.0.0"
+  }
+}
